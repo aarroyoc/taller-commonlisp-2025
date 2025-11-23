@@ -139,18 +139,28 @@ Hola Mundo
  - `C-x C-e` evaluar s-expresión
  - `C-M-x` evaluar función actual
 
+== Reader y Evaluator
+- En un lenguaje tradicional, el compilador o intérprete es una caja negra
+  - Lexer, parser y code generation son etapas que no podemos controlar
+- En Lisp está caja se abre.
+  - El Reader lee los caracteres para formar s-expresiones (expresiones atómicas o listas con paréntesis)
+  - El Evaluator usa las s-expresiones y ejecuta las formas.
+- Podemos ejecutar código durante el Reader de modo que generamos más formas que las que originalmente había en el código: mediante macros
+
 == S-Expresiones
 
-- Una s-expresión es una lista compuesta rodeada por paréntesis y separada por espacios
-- El primer elemento de la lista es una función
-- El resto son argumentos, que también pueden ser s-expresiones
-- Las s-expresiones mapean de forma directa al AST del compilador
+```lisp
+(foo 1 2)
+("foo" 1 2)
+```
+ambas son s-expresiones válidas, pero solo una puede evaluarse como una forma Lisp
 
-== Listas
+== Listas y s-expresiones
 - La estructura de datos fundamental de Lisp son las listas enlazadas.
 - Cada elemento se compone de un item y una referencia al siguiente elemento o nil si no hay más elementos.
 - La lista vacía es nil
 - Se pueden crear con la función `cons` o con `list`
+- Una s-expresión es una lista o un átomo
 
 ```lisp
 CL-USER> (cons 1 (cons 2 nil))
@@ -161,15 +171,29 @@ CL-USER> (list 1 2)
 
 == Quoting
 
-- Ya que las sexpresiones son listas, ¿no podemos crear listas como sexpresiones?
-- El problema es que el primer elemento de las sexpresiones se evalúa
-- Con el quoting podemos dejar código sin evaluar
+- Por defecto, todas las s-expresiones se van a intentar evaluar
+- Pero mediante el quoting (comilla simple) podemos parar el efecto en una s-expresión
 
 ```lisp
 CL-USER> '(1 2 3)
 (1 2 3)
 CL-USER> 'ok
 OK
+```
+
+== Quasiquoting
+
+- Podemos usar backquotes y comas para realizar un quoting selectivo
+
+```lisp
+CL-USER> '(1 2 (+ 1 2))
+(1 2 (+ 1 2))
+CL-USER> `(1 2 ,(+ 1 2))
+(1 2 3)
+CL-USER> `(1 2 ,(list 3 4))
+(1 2 (3 4))
+CL-USER> `(1 2 ,@(list 3 4))
+(1 2 3 4)
 ```
 
 == Aritmética y comparadores
@@ -217,6 +241,20 @@ Funciones de utilidad: not, and, or, =, mod, zerop
     (do-something)
     (do-something-else))
 ```
+
+== Condicional cond
+```lisp
+(cond
+  ((> x 0) 'positive)
+  ((< x 0) 'negative)
+  (t 'zero))
+```
+
+== Pregunta sobre if
+
+- ¿if puede ser una función en Common Lisp?
+- ¿y cond?
+
 
 == Factorial
 
@@ -292,7 +330,7 @@ CL-USER> *players*
 
 == let
 
-- Con let introducimos variables locales. Common Lisp tiene scope léxico.
+- Con let introducimos variables locales.
 
 ```lisp
 CL-USER> (let ((x 5) (y 4)) (+ x y))
@@ -309,6 +347,30 @@ CL-USER> (let ((a 5) (b (+ a 1))) (+ a b))
 CL-USER> (let* ((a 5) (b (+ a 1))) (+ a b))
 11
 ```
+
+== Lexical scope
+
+- Si las variables que introducimos son locales, estan tienen lexical scope, que es el habitual en los lenguajes de programación modernos
+- Es decir, solo puedes acceder a variables si puedes verlas desde tu contexto textual
+- Pero en Common Lisp las variables globales tienen dynamic scope
+
+== Dynamic scope
+
+- En dynamic scope, la definición de una variable se ve afectada por el contexto donde ha sido llamada, aunque no tenga acceso directo
+
+```lisp
+(defvar *x* 5)
+(defun foo () (format t "~d~%" *x*))
+
+(foo) => 5
+(defun bar ()
+    (let ((*x* 10))
+      (foo))))
+(bar) => 10
+(foo) => 5
+```
+
+- La redefinición de x en la función bar ha afectado al valor que ve foo de x, aunque de forma temporal
 
 == Listas II
 
@@ -377,6 +439,25 @@ CL-USER> (apply #'mod '(10 3))
 1
 ```
 
+== Macros
+
+- Con macros podemos generar formas Lisp basándonos en s-expresiones
+- Las macros se ejecutan en antes del código normal, puede que incluso con mucha diferencia de tiempo (compile-file vs load), son parte de lo que en otros lenguajes sería el propio compilador
+- Las s-expresiones de las macros no tienen por qué ser formas Lisp válidas
+
+== Macro deg2rad
+
+```lisp
+(defmacro deg2rad (a)
+    (if (numberp a)
+        (* a (/ pi 180))
+        `(* ,a ,(/ pi 180))))
+```
+
+- si la macro se invoca con una constante numérica, directamente se calcula el número en tiempo de compilación.
+- si no lo es (se usa una variable), se genera el código para hacer la multiplicación cuando toque
+
+
 == Arrays y Hash Tables
 
 - Podemos crear arrays con `make-array` o con la sintaxis `#(1 2 3 4)`.
@@ -442,7 +523,7 @@ T
         (+ 1 (if (evenp n)
                  (collatz (/ n 2))
                  (collatz (+ 1 (* n 3))))))))
-```lisp
+```
 
 == Números perfectos
 
@@ -513,4 +594,32 @@ T
                     (setf rest (/ rest current-test-factor)))
                   (setf current-test-factor (+ current-test-factor 1))))
              finally (return (nreverse prime-factors)))))
+```
+
+== Format
+
+- Existe una función cómoda para formatear strings, llamada `format`.
+- El primer argumento es el destino que puede ser un stream, t (stdout) o nil
+- En caso de nil, format simplemente devuelve el string formateado pero no lo escribe ni en un fichero ni en la terminal.
+- Los operadores de format son diferentes a los de printf de C
+- `~%` nueva línea
+- `~s` imprimir contenido de variable en formato legible por Lisp
+- `~d` imprimir número decimal
+- `~f` imprimir número con coma flotante
+- `~a` imprimir contenido de varibale en formato "humano"
+
+```lisp
+CL-USER> (format t "Hola, este es el mensaje n ~d para el ~s, por favor contesta, ~a" 12 "GUI" "GUI")
+Hola, este es el mensaje n 12 para el "GUI", por favor contesta, GUI
+```
+
+== Abrir archivos
+- Podemos usar `with-open-file` para abrir archivos, especificando multitud de opciones
+
+```lisp
+(with-open-file (output "output-file.txt"
+                  :direction         :output
+                  :if-does-not-exist :create
+                  :if-exists         :append)
+  (format output "1 + 2 = ~d~%" 3))
 ```
